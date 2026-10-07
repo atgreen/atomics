@@ -14,21 +14,21 @@
    #:defstruct))
 (in-package #:org.shirakumo.atomics)
 
-#+(or allegro clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-car *features*)
-#+(or allegro ccl clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro ccl clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-svref *features*)
-#+(or allegro clasp ecl sbcl cmucl)
+#+(or allegro clasp ecl egcl sbcl cmucl)
 (pushnew :atomics-cas-symbol-plist *features*)
-#+(or allegro clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-symbol-value *features*)
-#+(or allegro clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-slot-value *features*)
 #+(or allegro)
 (pushnew :atomics-cas-memref *features*)
-#+(or allegro ccl clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro ccl clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-struct-slot *features*)
-#+(or allegro ccl clasp ecl lispworks mezzano sbcl cmucl)
+#+(or allegro ccl clasp ecl egcl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-special-var *features*)
 #+(or clasp ecl lispworks mezzano sbcl cmucl)
 (pushnew :atomics-cas-custom *features*)
@@ -50,7 +50,8 @@ the necessary operators, please file an issue at
 (defun no-support (&optional operation)
   (error 'implementation-not-supported :operation operation))
 
-(defmacro cas (place old new)
+(defmacro cas (place old new &environment env)
+  #-egcl (declare (ignore env))
   #+allegro
   `(if (excl:atomic-conditional-setf ,place ,new ,old) T NIL)
   #+ccl
@@ -61,6 +62,16 @@ the necessary operators, please file an issue at
   #+ecl
   (let ((tmp (gensym "OLD")))
     `(let ((,tmp ,old)) (eq ,tmp (mp:compare-and-swap ,place ,tmp ,new))))
+  #+egcl
+  (multiple-value-bind (temps values stores writer reader)
+      (get-setf-expansion (macroexpand place env) env)
+    (declare (ignore stores writer))
+    (let ((expected (gensym "OLD"))
+          (replacement (gensym "NEW")))
+      `(let* (,@(mapcar #'list temps values)
+              (,expected ,old)
+              (,replacement ,new))
+         (eq ,expected (egcl-ext:cas ,reader ,expected ,replacement)))))
   #+lispworks
   `(system:compare-and-swap ,place ,old ,new)
   #+mezzano
@@ -79,7 +90,7 @@ the necessary operators, please file an issue at
        (progn
          (setf ,place ,new)
          T)))
-  #-(or allegro ccl clasp ecl lispworks mezzano sbcl cmucl)
+  #-(or allegro ccl clasp ecl egcl lispworks mezzano sbcl cmucl)
   (no-support 'CAS))
 
 (defmacro atomic-incf (place &optional (delta 1))
